@@ -2,6 +2,10 @@ import json
 import logging
 from typing import Any, Dict
 
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from mistral_common.protocol.instruct.messages import SystemMessage, UserMessage
+from mistral_common.protocol.instruct.request import ChatCompletionRequest
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -24,6 +28,23 @@ class LLMAsJudge:
         """
         self.client = client
         self.model = model
+        
+        self.tokenizer = MistralTokenizer.v3() 
+        
+    def _count_messages_tokens(self, system_prompt: str, user_message: str) -> int:
+        """
+        Считает токены сразу по всей паре сообщений (system + user).
+        Возвращает len(tokens) из encode_chat_completion.
+        """
+        req = ChatCompletionRequest(
+            model=self.model,
+            messages=[
+                SystemMessage(content=system_prompt),
+                UserMessage(content=user_message),
+            ],
+        )
+        tokenized = self.tokenizer.encode_chat_completion(req)
+        return len(tokenized.tokens)
 
     def extract_key_aspects(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -36,37 +57,37 @@ class LLMAsJudge:
         system_prompt = (
             '''Ты — эксперт по маркетингу и таргетингу. Твоя задача — на основе описания посадочной страницы:
             1. Выделить название рекламного объекта
-2. Сгенерировать 3–5 наиболее релевантных категорий продукта или услуги. При выборе опирайся на бизнес-логику: эти категории будут использоваться в алгоритмах для поиска и сегментирования целевой аудитории, где можно прорекламировать этот продукт.
-3. Для каждой сгенерированной категории подобрать ровно одну тематику ТОЛЬКО из этого списка:
-   Бизнес и стартапы; Букмекерство; Видео и фильмы; Даркнет; Дизайн; Для взрослых; Еда и кулинария; Здоровье и Фитнес; Игры;
-   Интерьер и строительство; Искусство; Картинки и фото; Карьера; Книги; Криптовалюты; Курсы и гайды; Лингвистика; Маркетинг, PR, реклама; Медицина; Мода и красота; Музыка; Новости и СМИ; Образование; Познавательное; Политика; Право; Природа; Продажи; Психология; Путешествия; Религия; Рукоделие; Семья и дети; Софт и приложения; Спорт; Технологии; Транспорт; Эзотерика; Экономика; Эротика; Юмор и развлечения.
-   
-Верни результат в виде JSON без пояснений:
-```json
-{
-  "brand_name": "…Название рекламного продукта или услуги…"
-  "categories": [
-    {
-      "name": "…сгенерированная категория…",
-      "theme": "…из списка тем…"
-    },
-    // ещё 2–4 пары
-  ]
-}'''
+            2. Подобрать исключительно подходящие тематики к посадочной странице ТОЛЬКО из этого списка:
+               Бизнес и стартапы; Букмекерство; Видео и фильмы; Даркнет; Дизайн; Для взрослых; Еда и кулинария; Здоровье и Фитнес; Игры;
+               Интерьер и строительство; Искусство; Картинки и фото; Карьера; Книги; Криптовалюты; Курсы и гайды; Лингвистика; Маркетинг, PR, реклама; Медицина; Мода и красота; Музыка; Новости и СМИ; Образование; Познавательное; Политика; Право; Природа; Продажи; Психология; Путешествия; Религия; Рукоделие; Семья и дети; Софт и приложения; Спорт; Технологии; Транспорт; Эзотерика; Экономика; Эротика; Юмор и развлечения.
+            3. Сгенерировать наилучший промпт для написания рекламных креативов, который описывает исключительно важнейшую информацию и ключевые преимущества с посадочной страницы (не сильно длинный, до 200 символов)
+
+            Верни результат в виде JSON без пояснений:
+            ```json
+            {
+              "brand_name": "…Название рекламного продукта или услуги…"
+              "themes": [
+                "..релевантная тематика из списка..", 
+                // еще несколько тематик (если релевантные)
+              ]
+              "prompt": "…Сгенерированный промпт…"
+            }'''
         )
 
         user_message = (
             "Контент посадочной страницы:\n" +
             json.dumps(parsed_data, ensure_ascii=False, indent=2)
         )
+        if len(user_message) > 9000:
+            user_message = user_message[:9000]   
+        #used = self._count_messages_tokens(system_prompt, user_message)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
         ]
-        print(system_prompt)
-        print(user_message)
+
         try:
-            chat_response = self.client.chat.complete(model=self.model, messages=messages)
+            chat_response = self.client.chat.complete(model=self.model, messages=messages, temperature=0.0)
             response_content = chat_response.choices[0].message.content
             response_content = response_content.strip("```json").strip("```").strip()
             key_aspects = json.loads(response_content)

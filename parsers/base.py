@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import getpass
 import os
+import re
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,42 @@ class LandingPageParser:
         """
         self.url: str = url
         self.timeout: int = timeout
+        
+    @staticmethod
+    def preprocess_text(raw_text: str) -> str:
+        """
+        Предобрабатывает текст, выполняя:
+          - Нормализацию пробелов (замена '\xa0' и '\n' на ". ").
+          - Удаление номеров телефонов и ссылок.
+          - Разбиение на предложения и фильтрацию коротких/дублированных фрагментов.
+          - Приведение к нижнему регистру и удаление всех числовых значений.
+    
+        :param raw_text: Исходный текст.
+        :return: Предобработанный текст.
+        """
+        text = raw_text.replace('\xa0', '. ')
+        text = text.replace('\n', '. ')
+        text = re.sub(r'\s+', ' ', text)
+    
+        phone_regex = r'(\+7\s*\(?\d{3}\)?[\s-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}|8\s*\(?\d{3}\)?[\s-]*\d{3}[\s-]*\d{2}[\s-]*\d{2})'
+        text = re.sub(phone_regex, '', text)
+        link_regex = r'http[s]?://\S+|www\S+'
+        text = re.sub(link_regex, '', text)
+    
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        seen = set()
+        filtered_sentences = []
+        for s in sentences:
+            s_clean = s.strip()
+            if len(s_clean) < 10:
+                continue
+            if s_clean.lower() not in seen:
+                seen.add(s_clean.lower())
+                filtered_sentences.append(s_clean)
+        
+        processed_text = ' '.join(filtered_sentences).lower()
+        processed_text = re.sub(r'\b\d+(?:[.,]\d+)?\b', '', processed_text)
+        return processed_text
 
     def fetch_page(self) -> Optional[str]:
         """
@@ -109,7 +146,7 @@ class LandingPageParser:
                 paragraphs.append(text)
         result['paragraphs'] = paragraphs
 
-        result['full_text'] = soup.get_text(separator='\n', strip=True)
+        result['full_text'] = self.preprocess_text(soup.get_text(separator='\n', strip=True))
 
         logger.info("Парсинг завершён успешно.")
         return result

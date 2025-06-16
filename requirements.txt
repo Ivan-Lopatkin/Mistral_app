@@ -4,3 +4,4 @@ beautifulsoup4
 fastapi
 pydantic
 uvicorn
+mistral_common==1.5.5

@@ -96,13 +96,13 @@ if st.session_state["judge_output"]:
         help="При необходимости отредактируйте название"
     )
 
-    category_names = [c["name"] for c in out.get("categories", [])]
+    themes_names = out.get("themes", [])
 
     # Отображаем их в виде тегов, которые пользователь может убирать
     selected = st.multiselect(
         label="Чем вы занимаетесь",
-        options=category_names,
-        default=category_names,
+        options=themes_names,
+        default=themes_names,
         help="Отметьте релевантные категории (чтобы убрать — нажмите на × в теге)"
     )
 
@@ -112,7 +112,7 @@ if st.session_state["judge_output"]:
     st.header("5. Опишите рекламируемый объект своими словами")
     user_prompt = st.text_area(
         "Ваш промпт",
-        placeholder="Например: «Наш продукт — это… То, чем он полезен…»",
+        placeholder=out.get("prompt", []),
         height=150
     )
     if user_prompt:
