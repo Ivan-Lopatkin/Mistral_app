@@ -1,4 +1,5 @@
 mistralai
+streamlit
 requests
 beautifulsoup4
 fastapi
