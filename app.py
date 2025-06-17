@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from llm_as_judge import LLMAsJudge
 from factory import get_parser
-from creative_generation import CreativeGenerator
+from moderation import CreativeGenerator # creative_generation
 from mistralai import Mistral
 
 logging.basicConfig(level=logging.INFO)
