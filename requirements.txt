@@ -1,6 +1,3 @@
 mistralai
 requests
 beautifulsoup4
-fastapi
-pydantic
-uvicorn
