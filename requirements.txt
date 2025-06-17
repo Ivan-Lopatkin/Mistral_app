@@ -4,5 +4,4 @@ beautifulsoup4
 fastapi
 pydantic
 uvicorn
-sentencepiece==0.1.99
 
