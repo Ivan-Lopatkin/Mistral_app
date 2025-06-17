@@ -2,9 +2,9 @@ import json
 import logging
 from typing import Any, Dict
 
-from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
-from mistral_common.protocol.instruct.messages import SystemMessage, UserMessage
-from mistral_common.protocol.instruct.request import ChatCompletionRequest
+# from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+# from mistral_common.protocol.instruct.messages import SystemMessage, UserMessage
+# from mistral_common.protocol.instruct.request import ChatCompletionRequest
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -29,22 +29,22 @@ class LLMAsJudge:
         self.client = client
         self.model = model
         
-        self.tokenizer = MistralTokenizer.v3() 
+        # self.tokenizer = MistralTokenizer.v3() 
         
-    def _count_messages_tokens(self, system_prompt: str, user_message: str) -> int:
-        """
-        Считает токены сразу по всей паре сообщений (system + user).
-        Возвращает len(tokens) из encode_chat_completion.
-        """
-        req = ChatCompletionRequest(
-            model=self.model,
-            messages=[
-                SystemMessage(content=system_prompt),
-                UserMessage(content=user_message),
-            ],
-        )
-        tokenized = self.tokenizer.encode_chat_completion(req)
-        return len(tokenized.tokens)
+    # def _count_messages_tokens(self, system_prompt: str, user_message: str) -> int:
+    #     """
+    #     Считает токены сразу по всей паре сообщений (system + user).
+    #     Возвращает len(tokens) из encode_chat_completion.
+    #     """
+    #     req = ChatCompletionRequest(
+    #         model=self.model,
+    #         messages=[
+    #             SystemMessage(content=system_prompt),
+    #             UserMessage(content=user_message),
+    #         ],
+    #     )
+    #     tokenized = self.tokenizer.encode_chat_completion(req)
+    #     return len(tokenized.tokens)
 
     def extract_key_aspects(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
