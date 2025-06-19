@@ -1,6 +1,8 @@
+import re
 import json
 import logging
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 # from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 # from mistral_common.protocol.instruct.messages import SystemMessage, UserMessage
@@ -21,13 +23,14 @@ def timeout_handler(signum, frame):
 
 
 class LLMAsJudge:
-    def __init__(self, client: Any, model: str) -> None:
+    def __init__(self, client: Any, model: str, url: str) -> None:
         """
         :param client: Экземпляр клиента для доступа к API Mistral.
         :param model: Имя используемой модели (например, 'mistral-large-latest').
         """
         self.client = client
         self.model = model
+        self.url = url
         
         # self.tokenizer = MistralTokenizer.v3() 
         
@@ -45,6 +48,21 @@ class LLMAsJudge:
     #     )
     #     tokenized = self.tokenizer.encode_chat_completion(req)
     #     return len(tokenized.tokens)
+    
+    def _is_telegram(self) -> bool:
+        return "t.me" in urlparse(self.url).netloc
+    
+    def _extract_json(self, text: str) -> str:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            raise JSONParseError("JSON block not found in response")
+        return match.group(0)
+
+    def _safe_load(self, raw: str) -> dict:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}\nRaw content: {raw}")
 
     def extract_key_aspects(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -87,13 +105,17 @@ class LLMAsJudge:
         ]
 
         try:
-            chat_response = self.client.chat.complete(model=self.model, messages=messages, temperature=0.0)
+            chat_response = self.client.chat.complete(model=self.model, messages=messages, temperature=0)
             response_content = chat_response.choices[0].message.content
-            response_content = response_content.strip("```json").strip("```").strip()
-            key_aspects = json.loads(response_content)
+            json_block = self._extract_json(response_content)
+            key_aspects = self._safe_load(json_block)
+            # response_content = response_content.strip("```json").strip("```").strip()
+            # key_aspects = json.loads(response_content)
             logger.info("Ключевые аспекты успешно получены от LLM.")
         except Exception as e:
             logger.error(f"Ошибка при извлечении ключевых аспектов: {e}")
             key_aspects = {}
-
+            
+        if self._is_telegram():
+            key_aspects['brand_name'] = parsed_data['title']
         return key_aspects

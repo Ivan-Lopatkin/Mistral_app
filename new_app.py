@@ -35,8 +35,8 @@ api_key = st.text_input("API Key", type="password", placeholder="sk-...")
 
 st.header("3. Выберите модель")
 model_options = [
-    "mistral-small-latest",
     "mistral-large-latest",
+    "mistral-small-latest",
     "open-mistral-7b"
 ]
 st.session_state.setdefault("selected_model", model_options[0])
@@ -62,7 +62,7 @@ if url_input and st.button("Проанализировать страницу"):
             st.error(parsed["error"])
         else:
             st.session_state["parsed_data"] = parsed
-            llm = LLMAsJudge(client=client, model=st.session_state["selected_model"] )
+            llm = LLMAsJudge(client=client, model=st.session_state["selected_model"], url=url_input)
             judge_out = llm.extract_key_aspects(parsed)
             st.session_state["judge_output"] = judge_out
 
