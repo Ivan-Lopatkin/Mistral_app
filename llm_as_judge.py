@@ -1,8 +1,10 @@
 import re
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 from urllib.parse import urlparse
+
+from pydantic import BaseModel, ValidationError
 
 # from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 # from mistral_common.protocol.instruct.messages import SystemMessage, UserMessage
@@ -11,6 +13,13 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+class KeyAspectsModel(BaseModel):
+    brand_name: str
+    themes: List[str]
+    prompt: str
+    
+class JSONParseError(Exception):
+    pass
 
 class TimeoutException(Exception):
     """Исключение, выбрасываемое при превышении времени ожидания ответа от API."""
@@ -23,7 +32,10 @@ def timeout_handler(signum, frame):
 
 
 class LLMAsJudge:
-    def __init__(self, client: Any, model: str, url: str) -> None:
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1
+    
+    def __init__(self, client: Any, model: str, url: str, max_retries: int = 3) -> None:
         """
         :param client: Экземпляр клиента для доступа к API Mistral.
         :param model: Имя используемой модели (например, 'mistral-large-latest').
@@ -31,6 +43,7 @@ class LLMAsJudge:
         self.client = client
         self.model = model
         self.url = url
+        self.max_retries = max_retries or self.MAX_RETRIES
         
         # self.tokenizer = MistralTokenizer.v3() 
         
@@ -57,12 +70,29 @@ class LLMAsJudge:
         if not match:
             raise JSONParseError("JSON block not found in response")
         return match.group(0)
-
-    def _safe_load(self, raw: str) -> dict:
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e}\nRaw content: {raw}")
+    
+    def _api_call(self, messages: List[Dict[str, str]], temperature: float, top_p: float) -> str:
+        retries = 0
+        while True:
+            try:
+                resp = self.client.chat.complete(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    stream=False
+                )
+                return resp.choices[0].message.content
+            except Exception as e:
+                err = str(e)
+                if '429' in err and retries < self.max_retries:
+                    wait = self.RETRY_DELAY * (2 ** retries)
+                    logger.warning(f"Получен 429, повтор через {wait}s (попытка {retries+1})...")
+                    time.sleep(wait)
+                    retries += 1
+                    continue
+                logger.error(f"API call failed: {e}")
+                raise
 
     def extract_key_aspects(self, parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -80,14 +110,14 @@ class LLMAsJudge:
                Интерьер и строительство; Искусство; Картинки и фото; Карьера; Книги; Криптовалюты; Курсы и гайды; Лингвистика; Маркетинг, PR, реклама; Медицина; Мода и красота; Музыка; Новости и СМИ; Образование; Познавательное; Политика; Право; Природа; Продажи; Психология; Путешествия; Религия; Рукоделие; Семья и дети; Софт и приложения; Спорт; Технологии; Транспорт; Эзотерика; Экономика; Эротика; Юмор и развлечения.
             3. Сгенерировать наилучший промпт для написания рекламных креативов, который описывает исключительно важнейшую информацию и ключевые преимущества с посадочной страницы (не сильно длинный, до 200 символов)
 
-            Верни результат в виде JSON без пояснений:
+            Верни строго JSON по схеме без лишних объяснений:
             ```json
             {
-              "brand_name": "…Название рекламного продукта или услуги…"
+              "brand_name": "…Название рекламного продукта или услуги…",
               "themes": [
                 "..релевантная тематика из списка..", 
                 // еще несколько тематик (если релевантные)
-              ]
+              ],
               "prompt": "…Сгенерированный промпт…"
             }'''
         )
@@ -103,19 +133,41 @@ class LLMAsJudge:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
         ]
+        last_error = None
+        response_content = None
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response_content = self._api_call(
+                    messages=messages,
+                    temperature=0.0,
+                    top_p=1.0
+                )
+                # chat_response = self.client.chat.complete(model=self.model, messages=messages, temperature=0)
+                # response_content = response_content.choices[0].message.content
+                json_block = self._extract_json(response_content)
+                obj = KeyAspectsModel.parse_raw(json_block)
+                result = obj.dict()
+                logger.info("Успешно получили и валидаировали JSON от LLM.")
+                if self._is_telegram():
+                    result['brand_name'] = str(parsed_data.get('title',''))[:40]
+                return result
+            except (json.JSONDecodeError, ValidationError, ValueError) as e:
+                last_error = e
+                logger.warning(f"Валидация JSON не прошла: {e}")
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Ваш предыдущий ответ не прошёл валидацию. "
+                        "Вот он:\n\n"
+                        f"{response_content}\n\n"
+                        "Пожалуйста, исправьте его и верните только чистый JSON "
+                        "с полями:\n"
+                        "- brand_name: строка\n"
+                        "- themes: список строк\n"
+                        "- prompt: строка\n"
+                    )
+                })
 
-        try:
-            chat_response = self.client.chat.complete(model=self.model, messages=messages, temperature=0)
-            response_content = chat_response.choices[0].message.content
-            json_block = self._extract_json(response_content)
-            key_aspects = self._safe_load(json_block)
-            # response_content = response_content.strip("```json").strip("```").strip()
-            # key_aspects = json.loads(response_content)
-            logger.info("Ключевые аспекты успешно получены от LLM.")
-        except Exception as e:
-            logger.error(f"Ошибка при извлечении ключевых аспектов: {e}")
-            key_aspects = {}
-            
-        if self._is_telegram():
-            key_aspects['brand_name'] = parsed_data['title']
-        return key_aspects
+        logger.error(f"Не удалось получить корректный JSON: {last_error}")
+        raise RuntimeError(f"Failed to extract valid JSON after {self.max_retries} attempts.")

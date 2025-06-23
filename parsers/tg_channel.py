@@ -1,4 +1,4 @@
-# from urlib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 from .base import LandingPageParser
 
@@ -41,3 +41,24 @@ class TelegramWebParser(LandingPageParser):
             "description": description,
             "last_posts": posts
         }
+    
+class TelegramPostParser(LandingPageParser):
+    def parse(self):
+        html = self.fetch_page()
+        if not html:
+            return {"error": "Не удалось загрузить страницу."}
+
+        soup = BeautifulSoup(html, "html.parser")
+        data = {}
+        og_title = soup.find("meta", property="og:title")
+        data["title"] = og_title["content"] if og_title and og_title.has_attr("content") else None
+
+        og_desc = soup.find("meta", property="og:description")
+        data["description"] = og_desc["content"] if og_desc and og_desc.has_attr("content") else None
+
+        # og_img = soup.find("meta", property="og:image")
+        # data["image"] = og_img["content"] if og_img and og_img.has_attr("content") else None
+
+        twitter_url = soup.find("meta", attrs={"name": "twitter:app:url:googleplay"})
+        data["url"] = twitter_url["content"] if twitter_url and twitter_url.has_attr("content") else None
+        return data
